@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package notification.v1;
+
+option java_package = "com.doiwsc.notification.v1";
+option java_multiple_files = true;
+
+// NotificationService records outbound messages (email/SMS in a real system).
+service NotificationService {
+  // Notify is best-effort: the orchestrator never fails a saga because of it.
+  // Idempotent by idempotency_key so retries never send duplicates.
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+}
+
+message NotifyRequest {
+  string idempotency_key = 1;
+  string order_id = 2;
+  string recipient = 3;
+  // e.g. "ORDER_CONFIRMED", "ORDER_FAILED"
+  string kind = 4;
+  string subject = 5;
+  string body = 6;
+}
+
+message NotifyResponse {
+  bool accepted = 1;
+  string notification_id = 2;
+}

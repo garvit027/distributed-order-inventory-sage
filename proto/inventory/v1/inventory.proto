@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+option java_package = "com.doiwsc.inventory.v1";
+option java_multiple_files = true;
+
+// InventoryService owns stock levels and reservation lifecycle.
+// Business outcomes (e.g. insufficient stock) are expressed as response
+// fields, NOT gRPC status codes. Non-OK statuses are reserved for
+// technical failures (unavailable, deadline exceeded, internal).
+service InventoryService {
+  // Reserve decrements available stock for the given lines and records a
+  // reservation. Retrying with the same idempotency_key returns the original
+  // result and never decrements twice.
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+
+  // Release undoes a reservation (compensating transaction). Idempotent:
+  // releasing an already-released or unknown reservation succeeds as a no-op
+  // when keyed by an already-processed idempotency_key.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // GetStock reports current stock for one or more SKUs (diagnostics/demo).
+  rpc GetStock(GetStockRequest) returns (GetStockResponse);
+
+  // SeedStock upserts stock rows. Demo/test convenience only.
+  rpc SeedStock(SeedStockRequest) returns (SeedStockResponse);
+}
+
+message StockLine {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message ReserveRequest {
+  string idempotency_key = 1;
+  string order_id = 2;
+  repeated StockLine items = 3;
+}
+
+message ReserveResponse {
+  bool reserved = 1;
+  // Set when reserved == true.
+  string reservation_id = 2;
+  // Machine-readable reason when reserved == false,
+  // e.g. "INSUFFICIENT_STOCK" or "UNKNOWN_SKU".
+  string failure_reason = 3;
+  // Populated when reserved == false and the reason is a stock problem.
+  repeated StockShortage shortages = 4;
+}
+
+message StockShortage {
+  string sku = 1;
+  int32 requested = 2;
+  int32 available = 3;
+}
+
+message ReleaseRequest {
+  string idempotency_key = 1;
+  string reservation_id = 2;
+}
+
+message ReleaseResponse {
+  bool released = 1;
+  string failure_reason = 2;
+}
+
+message GetStockRequest {
+  repeated string skus = 1;
+}
+
+message GetStockResponse {
+  repeated StockLevel levels = 1;
+}
+
+message StockLevel {
+  string sku = 1;
+  int32 available = 2;
+  int32 reserved = 3;
+  int64 row_version = 4;
+}
+
+message SeedStockRequest {
+  repeated StockLevel seed = 1;
+}
+
+message SeedStockResponse {
+  int32 upserted = 1;
+}

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package orchestrator.v1;
+
+import "inventory/v1/inventory.proto";
+
+option java_package = "com.doiwsc.orchestrator.v1";
+option java_multiple_files = true;
+
+// OrchestratorService drives the order saga. The Order service calls
+// StartSaga when an order is placed; the orchestrator then executes
+// reserve -> charge -> confirm (+ notify), compensating in reverse order
+// on failure.
+service OrchestratorService {
+  // StartSaga persists the saga and returns immediately; execution happens
+  // asynchronously. Poll GetSaga (or the order REST API) for progress.
+  rpc StartSaga(StartSagaRequest) returns (StartSagaResponse);
+  rpc GetSaga(GetSagaRequest) returns (GetSagaResponse);
+}
+
+message StartSagaRequest {
+  string idempotency_key = 1;
+  string order_id = 2;
+  string customer_id = 3;
+  string recipient = 4;
+  repeated inventory.v1.StockLine items = 5;
+  int64 amount_cents = 6;
+  string currency = 7;
+}
+
+message StartSagaResponse {
+  bool accepted = 1;
+  // Set when accepted == true.
+  string saga_id = 2;
+  // Set when accepted == false, e.g. "DUPLICATE_SAGA".
+  string failure_reason = 3;
+}
+
+message GetSagaRequest {
+  string saga_id = 1;
+}
+
+message GetSagaResponse {
+  bool found = 1;
+  string saga_id = 2;
+  string order_id = 3;
+  // PENDING, RUNNING, SUCCEEDED, FAILED, COMPENSATED
+  string state = 4;
+  repeated Step steps = 5;
+}
+
+message Step {
+  // RESERVE_INVENTORY, CHARGE_PAYMENT, CONFIRM_ORDER,
+  // RELEASE_INVENTORY, REFUND_PAYMENT, NOTIFY
+  string name = 1;
+  // PENDING, RUNNING, SUCCEEDED, FAILED, SKIPPED
+  string status = 2;
+  string detail = 3;
+  int64 started_at_unix_ms = 4;
+  int64 finished_at_unix_ms = 5;
+}

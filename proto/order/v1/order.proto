@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package order.v1;
+
+option java_package = "com.doiwsc.order.v1";
+option java_multiple_files = true;
+
+// OrderService is the public-edge service. It exposes REST only at the
+// boundary; these gRPC methods exist solely so the Order Orchestrator can
+// drive the order state machine.
+service OrderService {
+  rpc ConfirmOrder(ConfirmOrderRequest) returns (ConfirmOrderResponse);
+  rpc FailOrder(FailOrderRequest) returns (FailOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+}
+
+message ConfirmOrderRequest {
+  string idempotency_key = 1;
+  string order_id = 2;
+  string saga_id = 3;
+}
+
+message ConfirmOrderResponse {
+  bool updated = 1;
+  // Current status after the call: PENDING, CONFIRMED or FAILED.
+  string current_status = 2;
+}
+
+message FailOrderRequest {
+  string idempotency_key = 1;
+  string order_id = 2;
+  string saga_id = 3;
+  string reason = 4;
+}
+
+message FailOrderResponse {
+  bool updated = 1;
+  string current_status = 2;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message GetOrderResponse {
+  bool found = 1;
+  string order_id = 2;
+  string customer_id = 3;
+  string status = 4;
+  string failure_reason = 5;
+  string saga_id = 6;
+  int64 amount_cents = 7;
+  string currency = 8;
+}

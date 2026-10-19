@@ -1,0 +1,28 @@
+# Java
+services/*/target/
+*.class
+*.jar
+!gradle-wrapper.jar
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Runtime data
+data/
+*.db
+*.mv.db
+*.trace.db
+
+# Test artifacts
+pacts/*.json
+!pacts/.gitkeep
+reports/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
