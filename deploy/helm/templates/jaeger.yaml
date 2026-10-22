@@ -1,0 +1,70 @@
+{{- if .Values.global.jaeger.enabled }}
+# Jaeger all-in-one — OTLP/gRPC on 4317 receives spans from all five services.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.jaegerFullname" . }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: jaeger
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: "{{ .Values.global.jaeger.image.repository }}:{{ .Values.global.jaeger.image.tag }}"
+          imagePullPolicy: {{ .Values.global.jaeger.image.pullPolicy }}
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          ports:
+            - name: ui
+              containerPort: {{ .Values.global.jaeger.uiPort }}
+            - name: otlp-grpc
+              containerPort: {{ .Values.global.jaeger.otlpGrpcPort }}
+            - name: otlp-http
+              containerPort: {{ .Values.global.jaeger.otlpHttpPort }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.global.jaeger.uiPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.global.jaeger.uiPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.global.jaeger.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.jaegerFullname" . }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: jaeger
+spec:
+  selector:
+    app.kubernetes.io/component: jaeger
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: ui
+      port: {{ .Values.global.jaeger.uiPort }}
+      targetPort: {{ .Values.global.jaeger.uiPort }}
+    - name: otlp-grpc
+      port: {{ .Values.global.jaeger.otlpGrpcPort }}
+      targetPort: {{ .Values.global.jaeger.otlpGrpcPort }}
+    - name: otlp-http
+      port: {{ .Values.global.jaeger.otlpHttpPort }}
+      targetPort: {{ .Values.global.jaeger.otlpHttpPort }}
+{{- end }}

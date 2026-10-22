@@ -1,0 +1,89 @@
+# notification — FastAPI + gRPC; records outbound notifications (best-effort).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "notification" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification
+spec:
+  replicas: {{ .Values.notification.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: notification
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: notification
+      annotations:
+        checksum/env: {{ toJson .Values.notification.env | sha256sum }}
+    spec:
+      containers:
+        - name: notification
+          image: "{{ .Values.notification.image.repository }}:{{ .Values.notification.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.notification.image.pullPolicy }}
+          workingDir: /app/service
+          ports:
+            - name: http
+              containerPort: {{ .Values.notification.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.notification.service.grpcPort }}
+          env:
+            - name: HTTP_PORT
+              value: {{ .Values.notification.service.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.notification.service.grpcPort | quote }}
+            - name: NOTIFICATION_DB_PATH
+              value: "data/notification.db"
+            - name: OTEL_SERVICE_NAME
+              value: notification-service
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "order-inventory.otelEndpoint" . | quote }}
+            {{- with .Values.notification.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.notification.dataDir }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.notification.probes.path }}
+              port: {{ .Values.notification.service.httpPort }}
+            initialDelaySeconds: {{ .Values.notification.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.notification.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.notification.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.notification.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.notification.probes.path }}
+              port: {{ .Values.notification.service.httpPort }}
+            initialDelaySeconds: {{ .Values.notification.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.notification.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.notification.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.notification.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.notification.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "notification" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification
+spec:
+  selector:
+    app.kubernetes.io/component: notification
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.notification.service.httpPort }}
+      targetPort: {{ .Values.notification.service.httpPort }}
+    - name: grpc
+      port: {{ .Values.notification.service.grpcPort }}
+      targetPort: {{ .Values.notification.service.grpcPort }}

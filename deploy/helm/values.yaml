@@ -1,0 +1,153 @@
+# values.yaml — defaults for the "order-inventory" chart.
+#
+# Every service is pinned to replicaCount 1: each one embeds a stateful
+# database (H2 file for the Spring services, SQLite for the FastAPI ones)
+# on an emptyDir, so replicas share nothing and must not scale out.
+
+# Settings shared by every service.
+global:
+  # OTLP/gRPC endpoint for all services. Leave empty to derive
+  # http://<release>-jaeger:4317 from the bundled Jaeger deployment.
+  otelEndpoint: ""
+  jaeger:
+    enabled: true
+    image:
+      repository: jaegertracing/all-in-one
+      tag: "1.57"
+      pullPolicy: IfNotPresent
+    uiPort: 16686
+    otlpGrpcPort: 4317
+    otlpHttpPort: 4318
+    resources: {}
+  # INVENTORY_SEED — upserted at inventory startup (upsert-if-absent only).
+  seedStock: "WIDGET-RED:10,WIDGET-BLUE:3"
+  # PAYMENT_DECLINE_CUSTOMERS — customers that always get CARD_DECLINED.
+  declineCustomers: "cus_decline"
+
+order:
+  # Stateful (H2 file DB) — keep at 1.
+  replicaCount: 1
+  image:
+    repository: doiwsc/order
+    tag: "" # empty -> .Chart.AppVersion (0.1.0); matches the compose image tag
+    pullPolicy: IfNotPresent
+  service:
+    httpPort: 8080 # containerPort (HTTP edge)
+    grpcPort: 50051 # containerPort (gRPC, orchestrator only)
+  # Mount point of the H2 data directory inside the container.
+  dataDir: /app/data
+  env: [] # extra env entries appended last, i.e. they override the defaults
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  probes:
+    path: /actuator/health
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+orchestrator:
+  replicaCount: 1
+  image:
+    repository: doiwsc/orchestrator
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    httpPort: 8080
+    grpcPort: 50051
+  dataDir: /app/data
+  env: []
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  probes:
+    path: /actuator/health
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+inventory:
+  replicaCount: 1
+  image:
+    repository: doiwsc/inventory
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    httpPort: 8080
+    grpcPort: 50051
+  # SQLite lives under WORKDIR /app/service (contract §3.6).
+  dataDir: /app/service/data
+  env: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  probes:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+payment:
+  replicaCount: 1
+  image:
+    repository: doiwsc/payment
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    httpPort: 8080
+    grpcPort: 50051
+  dataDir: /app/service/data
+  env: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  probes:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+notification:
+  replicaCount: 1
+  image:
+    repository: doiwsc/notification
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    httpPort: 8080
+    grpcPort: 50051
+  dataDir: /app/service/data
+  env: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  probes:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6

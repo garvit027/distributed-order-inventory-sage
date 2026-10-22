@@ -1,0 +1,29 @@
+# Build context hygiene. Dockerfiles COPY only services/<name> and gen/python
+# (plus proto/ for the Maven builds), so nothing under gen/ or proto/ may be
+# excluded here.
+.git/
+.github/
+.venv/
+data/
+pacts/
+reports/
+
+# Java build output
+target/
+**/target/
+
+# Python caches / test artifacts
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+
+# Runtime databases and local junk
+*.db
+*.mv.db
+*.trace.db
+.DS_Store
+.idea/
+.vscode/
+.dev/

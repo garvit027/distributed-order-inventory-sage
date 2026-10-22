@@ -1,0 +1,93 @@
+# payment — FastAPI + gRPC; captures and refunds charges, applies decline rules.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "payment" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: payment
+spec:
+  replicas: {{ .Values.payment.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: payment
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: payment
+      annotations:
+        checksum/env: {{ toJson .Values.payment.env | sha256sum }}
+    spec:
+      containers:
+        - name: payment
+          image: "{{ .Values.payment.image.repository }}:{{ .Values.payment.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.payment.image.pullPolicy }}
+          workingDir: /app/service
+          ports:
+            - name: http
+              containerPort: {{ .Values.payment.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.payment.service.grpcPort }}
+          env:
+            - name: HTTP_PORT
+              value: {{ .Values.payment.service.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.payment.service.grpcPort | quote }}
+            - name: PAYMENT_DB_PATH
+              value: "data/payment.db"
+            - name: PAYMENT_DECLINE_CUSTOMERS
+              value: {{ .Values.global.declineCustomers | quote }}
+            - name: PAYMENT_DECLINE_ABOVE_CENTS
+              value: "-1"
+            - name: OTEL_SERVICE_NAME
+              value: payment-service
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "order-inventory.otelEndpoint" . | quote }}
+            {{- with .Values.payment.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.payment.dataDir }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.payment.probes.path }}
+              port: {{ .Values.payment.service.httpPort }}
+            initialDelaySeconds: {{ .Values.payment.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.payment.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.payment.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.payment.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.payment.probes.path }}
+              port: {{ .Values.payment.service.httpPort }}
+            initialDelaySeconds: {{ .Values.payment.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.payment.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.payment.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.payment.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.payment.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "payment" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: payment
+spec:
+  selector:
+    app.kubernetes.io/component: payment
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.payment.service.httpPort }}
+      targetPort: {{ .Values.payment.service.httpPort }}
+    - name: grpc
+      port: {{ .Values.payment.service.grpcPort }}
+      targetPort: {{ .Values.payment.service.grpcPort }}

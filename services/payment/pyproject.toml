@@ -1,0 +1,24 @@
+# Payment service (FastAPI + gRPC). Metadata only — the shared repo
+# .venv (see requirements.txt) is used for local dev/tests; the Dockerfile
+# installs the same dependencies into the image.
+[project]
+name = "payment-service"
+version = "0.1.0"
+description = "Payment charge/refund service (docs/CONTRACT.md sections 3.3/3.4)"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.66",
+    "grpcio-health-checking>=1.66",
+    "grpcio-reflection>=1.66",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.9",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+    "opentelemetry-instrumentation-grpc>=0.49b0",
+]
+
+[tool.setuptools]
+packages = ["app"]

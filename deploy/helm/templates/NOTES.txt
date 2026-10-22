@@ -1,0 +1,34 @@
+order-inventory {{ .Chart.Version }} installed as release "{{ .Release.Name }}"
+in namespace "{{ .Release.Namespace }}".
+
+Services (HTTP 8080 / gRPC 50051 in-cluster):
+{{- range $svc := list "order" "orchestrator" "inventory" "payment" "notification" }}
+  - {{ include "order-inventory.svcFullname" (list $svc $) }}
+{{- end }}
+
+{{ if .Values.global.jaeger.enabled }}Jaeger all-in-one: {{ include "order-inventory.jaegerFullname" . }}
+{{ end }}
+1. Expose the order-service REST edge:
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "order-inventory.svcFullname" (list "order" .) }} 8080:8080
+
+2. Place an order:
+
+     curl -i -X POST http://localhost:8080/api/orders \
+       -H 'Content-Type: application/json' \
+       -H 'Idempotency-Key: demo-1' \
+       -d '{"customerId":"cus_ok","amountCents":2500,"items":[{"sku":"WIDGET-RED","quantity":2}]}'
+
+3. Poll the order until CONFIRMED:
+
+     curl http://localhost:8080/api/orders/<orderId>
+
+4. Browse traces:
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "order-inventory.jaegerFullname" . }} 16686:16686
+
+   then open http://localhost:16686 and look for services "order-service"
+   and "orchestrator".
+
+NOTE: replicaCount is pinned to 1 for every service — each one embeds a
+stateful database (H2 file / SQLite) on an emptyDir. Do not scale out.

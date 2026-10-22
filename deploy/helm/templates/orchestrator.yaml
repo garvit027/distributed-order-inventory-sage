@@ -1,0 +1,114 @@
+# orchestrator — saga state machine; drives orders via order-service gRPC.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "orchestrator" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orchestrator
+spec:
+  replicas: {{ .Values.orchestrator.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: orchestrator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: orchestrator
+      annotations:
+        checksum/env: {{ toJson .Values.orchestrator.env | sha256sum }}
+    spec:
+      containers:
+        - name: orchestrator
+          image: "{{ .Values.orchestrator.image.repository }}:{{ .Values.orchestrator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.orchestrator.image.pullPolicy }}
+          workingDir: /app
+          ports:
+            - name: http
+              containerPort: {{ .Values.orchestrator.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.orchestrator.service.grpcPort }}
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.orchestrator.service.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.orchestrator.service.grpcPort | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:./data/orchestrator-db"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "sa"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: ""
+            - name: ORDER_SERVICE_HOST
+              value: {{ include "order-inventory.svcFullname" (list "order" .) | quote }}
+            - name: ORDER_SERVICE_PORT
+              value: {{ .Values.order.service.grpcPort | quote }}
+            - name: INVENTORY_SERVICE_HOST
+              value: {{ include "order-inventory.svcFullname" (list "inventory" .) | quote }}
+            - name: INVENTORY_SERVICE_PORT
+              value: {{ .Values.inventory.service.grpcPort | quote }}
+            - name: PAYMENT_SERVICE_HOST
+              value: {{ include "order-inventory.svcFullname" (list "payment" .) | quote }}
+            - name: PAYMENT_SERVICE_PORT
+              value: {{ .Values.payment.service.grpcPort | quote }}
+            - name: NOTIFICATION_SERVICE_HOST
+              value: {{ include "order-inventory.svcFullname" (list "notification" .) | quote }}
+            - name: NOTIFICATION_SERVICE_PORT
+              value: {{ .Values.notification.service.grpcPort | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: orchestrator
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "order-inventory.otelEndpoint" . | quote }}
+            # Jaeger all-in-one 1.x accepts only traces over OTLP.
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            {{- with .Values.orchestrator.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.orchestrator.dataDir }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.orchestrator.probes.path }}
+              port: {{ .Values.orchestrator.service.httpPort }}
+            initialDelaySeconds: {{ .Values.orchestrator.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.orchestrator.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.orchestrator.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.orchestrator.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.orchestrator.probes.path }}
+              port: {{ .Values.orchestrator.service.httpPort }}
+            initialDelaySeconds: {{ .Values.orchestrator.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.orchestrator.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.orchestrator.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.orchestrator.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.orchestrator.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "orchestrator" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orchestrator
+spec:
+  selector:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.orchestrator.service.httpPort }}
+      targetPort: {{ .Values.orchestrator.service.httpPort }}
+    - name: grpc
+      port: {{ .Values.orchestrator.service.grpcPort }}
+      targetPort: {{ .Values.orchestrator.service.grpcPort }}

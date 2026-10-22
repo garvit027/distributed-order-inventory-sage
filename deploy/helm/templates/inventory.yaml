@@ -1,0 +1,91 @@
+# inventory — FastAPI + gRPC; owns stock levels, reservations and compensation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "inventory" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inventory
+spec:
+  replicas: {{ .Values.inventory.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: inventory
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: inventory
+      annotations:
+        checksum/env: {{ toJson .Values.inventory.env | sha256sum }}
+    spec:
+      containers:
+        - name: inventory
+          image: "{{ .Values.inventory.image.repository }}:{{ .Values.inventory.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.inventory.image.pullPolicy }}
+          workingDir: /app/service
+          ports:
+            - name: http
+              containerPort: {{ .Values.inventory.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.inventory.service.grpcPort }}
+          env:
+            - name: HTTP_PORT
+              value: {{ .Values.inventory.service.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.inventory.service.grpcPort | quote }}
+            - name: INVENTORY_DB_PATH
+              value: "data/inventory.db"
+            - name: INVENTORY_SEED
+              value: {{ .Values.global.seedStock | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: inventory-service
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "order-inventory.otelEndpoint" . | quote }}
+            {{- with .Values.inventory.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.inventory.dataDir }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.inventory.probes.path }}
+              port: {{ .Values.inventory.service.httpPort }}
+            initialDelaySeconds: {{ .Values.inventory.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.inventory.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.inventory.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.inventory.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.inventory.probes.path }}
+              port: {{ .Values.inventory.service.httpPort }}
+            initialDelaySeconds: {{ .Values.inventory.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.inventory.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.inventory.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.inventory.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.inventory.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "inventory" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inventory
+spec:
+  selector:
+    app.kubernetes.io/component: inventory
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.inventory.service.httpPort }}
+      targetPort: {{ .Values.inventory.service.httpPort }}
+    - name: grpc
+      port: {{ .Values.inventory.service.grpcPort }}
+      targetPort: {{ .Values.inventory.service.grpcPort }}

@@ -1,0 +1,204 @@
+# docker-compose.yaml — full local stack: 5 microservices + Jaeger.
+#
+# Contract: docs/CONTRACT.md §2 (topology/env), §3.6 (Dockerfiles), §3.7 (tracing).
+# Inside the network every container listens on HTTP 8080 and gRPC 50051;
+# only order-service publishes a host port (8080). Data dirs are mounted onto
+# named volumes so the embedded H2 / SQLite databases survive restarts.
+# NOTE: the service images must create their data directories owned by the
+# runtime (non-root) user, otherwise the named-volume mountpoints created by
+# Docker are root-owned and the databases cannot be written.
+name: doiwsc
+
+x-spring-healthcheck: &spring-healthcheck
+  # eclipse-temurin images ship neither curl nor wget, so probe the actuator
+  # health endpoint with curl/wget when present, else fall back to a plain
+  # TCP connect on port 8080 via bash's /dev/tcp.
+  test:
+    - CMD-SHELL
+    - >-
+      bash -c 'if command -v curl >/dev/null 2>&1; then curl -sf http://localhost:8080/actuator/health >/dev/null;
+      elif command -v wget >/dev/null 2>&1; then wget -q -O /dev/null http://localhost:8080/actuator/health;
+      else exec 3<>/dev/tcp/localhost/8080; fi'
+  interval: 5s
+  timeout: 10s
+  retries: 30
+  start_period: 45s
+
+x-python-healthcheck: &python-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+  interval: 5s
+  timeout: 5s
+  retries: 24
+  start_period: 20s
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI + query API
+      - "4317:4317"   # OTLP/gRPC receiver
+      - "4318:4318"   # OTLP/HTTP receiver
+    networks: [saga]
+
+  order:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    image: doiwsc/order:0.1.0
+    ports:
+      # The only published REST edge. Override the host side with
+      # ORDER_HTTP_PORT when 8080 is already taken on the host.
+      - "${ORDER_HTTP_PORT:-8080}:8080"
+    working_dir: /app
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "50051"
+      SPRING_DATASOURCE_URL: jdbc:h2:file:./data/order-db
+      SPRING_DATASOURCE_USERNAME: sa
+      SPRING_DATASOURCE_PASSWORD: ""
+      ORCHESTRATOR_SERVICE_HOST: orchestrator
+      ORCHESTRATOR_SERVICE_PORT: "50051"
+      OTEL_SERVICE_NAME: order-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      # Jaeger all-in-one 1.x accepts only traces over OTLP; disable the other
+      # signals so the agents don't spam UNIMPLEMENTED export errors.
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - order-data:/app/data
+    healthcheck: *spring-healthcheck
+    depends_on:
+      jaeger:
+        condition: service_started
+      orchestrator:
+        condition: service_healthy
+    networks: [saga]
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    image: doiwsc/orchestrator:0.1.0
+    working_dir: /app
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "50051"
+      SPRING_DATASOURCE_URL: jdbc:h2:file:./data/orchestrator-db
+      SPRING_DATASOURCE_USERNAME: sa
+      SPRING_DATASOURCE_PASSWORD: ""
+      ORDER_SERVICE_HOST: order
+      ORDER_SERVICE_PORT: "50051"
+      INVENTORY_SERVICE_HOST: inventory
+      INVENTORY_SERVICE_PORT: "50051"
+      PAYMENT_SERVICE_HOST: payment
+      PAYMENT_SERVICE_PORT: "50051"
+      NOTIFICATION_SERVICE_HOST: notification
+      NOTIFICATION_SERVICE_PORT: "50051"
+      ORCHESTRATOR_GRPC_DEADLINE_MS: "10000"
+      ORCHESTRATOR_MAX_RETRIES: "3"
+      ORCHESTRATOR_RETRY_BACKOFF_MS: "250"
+      ORCHESTRATOR_WORKERS: "4"
+      OTEL_SERVICE_NAME: orchestrator
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      # Jaeger all-in-one 1.x accepts only traces over OTLP; disable the other
+      # signals so the agents don't spam UNIMPLEMENTED export errors.
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - orchestrator-data:/app/data
+    healthcheck: *spring-healthcheck
+    depends_on:
+      jaeger:
+        condition: service_started
+      inventory:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+    networks: [saga]
+
+  inventory:
+    build:
+      context: .
+      dockerfile: services/inventory/Dockerfile
+    image: doiwsc/inventory:0.1.0
+    environment:
+      HTTP_PORT: "8080"
+      GRPC_PORT: "50051"
+      INVENTORY_DB_PATH: data/inventory.db # relative to WORKDIR /app/service
+      INVENTORY_SEED: WIDGET-RED:10,WIDGET-BLUE:3
+      OTEL_SERVICE_NAME: inventory-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      # Jaeger all-in-one 1.x accepts only traces over OTLP; disable the other
+      # signals so the agents don't spam UNIMPLEMENTED export errors.
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - inventory-data:/app/service/data
+    healthcheck: *python-healthcheck
+    depends_on:
+      jaeger:
+        condition: service_started
+    networks: [saga]
+
+  payment:
+    build:
+      context: .
+      dockerfile: services/payment/Dockerfile
+    image: doiwsc/payment:0.1.0
+    environment:
+      HTTP_PORT: "8080"
+      GRPC_PORT: "50051"
+      PAYMENT_DB_PATH: data/payment.db
+      PAYMENT_DECLINE_CUSTOMERS: cus_decline
+      PAYMENT_DECLINE_ABOVE_CENTS: "-1"
+      OTEL_SERVICE_NAME: payment-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      # Jaeger all-in-one 1.x accepts only traces over OTLP; disable the other
+      # signals so the agents don't spam UNIMPLEMENTED export errors.
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - payment-data:/app/service/data
+    healthcheck: *python-healthcheck
+    depends_on:
+      jaeger:
+        condition: service_started
+    networks: [saga]
+
+  notification:
+    build:
+      context: .
+      dockerfile: services/notification/Dockerfile
+    image: doiwsc/notification:0.1.0
+    environment:
+      HTTP_PORT: "8080"
+      GRPC_PORT: "50051"
+      NOTIFICATION_DB_PATH: data/notification.db
+      OTEL_SERVICE_NAME: notification-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      # Jaeger all-in-one 1.x accepts only traces over OTLP; disable the other
+      # signals so the agents don't spam UNIMPLEMENTED export errors.
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - notification-data:/app/service/data
+    healthcheck: *python-healthcheck
+    depends_on:
+      jaeger:
+        condition: service_started
+    networks: [saga]
+
+networks:
+  saga:
+    driver: bridge
+
+volumes:
+  order-data:
+  orchestrator-data:
+  inventory-data:
+  payment-data:
+  notification-data:

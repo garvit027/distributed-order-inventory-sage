@@ -1,0 +1,102 @@
+# order-service — public REST edge + gRPC server (called by the orchestrator).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "order" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  replicas: {{ .Values.order.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: order
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-inventory.labels" . | nindent 8 }}
+        app.kubernetes.io/component: order
+      annotations:
+        checksum/env: {{ toJson .Values.order.env | sha256sum }}
+    spec:
+      containers:
+        - name: order
+          image: "{{ .Values.order.image.repository }}:{{ .Values.order.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.order.image.pullPolicy }}
+          workingDir: /app
+          ports:
+            - name: http
+              containerPort: {{ .Values.order.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.order.service.grpcPort }}
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.order.service.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.order.service.grpcPort | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:./data/order-db"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "sa"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: ""
+            - name: ORCHESTRATOR_SERVICE_HOST
+              value: {{ include "order-inventory.svcFullname" (list "orchestrator" .) | quote }}
+            - name: ORCHESTRATOR_SERVICE_PORT
+              value: {{ .Values.orchestrator.service.grpcPort | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: order-service
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "order-inventory.otelEndpoint" . | quote }}
+            # Jaeger all-in-one 1.x accepts only traces over OTLP.
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            {{- with .Values.order.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.order.dataDir }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.order.probes.path }}
+              port: {{ .Values.order.service.httpPort }}
+            initialDelaySeconds: {{ .Values.order.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.order.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.order.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.order.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.order.probes.path }}
+              port: {{ .Values.order.service.httpPort }}
+            initialDelaySeconds: {{ .Values.order.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.order.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.order.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.order.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.order.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "order-inventory.svcFullname" (list "order" .) }}
+  labels:
+    {{- include "order-inventory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  selector:
+    app.kubernetes.io/component: order
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.order.service.httpPort }}
+      targetPort: {{ .Values.order.service.httpPort }}
+    - name: grpc
+      port: {{ .Values.order.service.grpcPort }}
+      targetPort: {{ .Values.order.service.grpcPort }}
