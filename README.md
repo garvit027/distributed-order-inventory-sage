@@ -40,6 +40,12 @@ make venv     # shared .venv for tests, e2e helpers and pact generation
 make up       # build all five images and start the stack + Jaeger
 ```
 
+> **Port 8080 already in use?** The REST edge is published on
+> `${ORDER_HTTP_PORT:-8080}`. Use any free port, e.g.
+> `ORDER_HTTP_PORT=18080 make up`, then call
+> `http://localhost:18080/api/orders`. `ORDER_HTTP_PORT=18080 make e2e` runs the
+> scenarios against the same port.
+
 Wait until `docker compose ps` shows everything healthy (Spring services take
 ~30–60s on first boot while H2 initializes), then place an order:
 
